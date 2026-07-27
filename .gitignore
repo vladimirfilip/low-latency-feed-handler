@@ -1,0 +1,4 @@
+.vscode/
+data/
+build/
+bench/.venv/
