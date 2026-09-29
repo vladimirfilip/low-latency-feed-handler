@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include <ingest_source.hpp>
+#include <itch_messages.hpp>
 #include <mold_udp64.hpp>
 
 constexpr size_t UDP_MAX_DATAGRAM = 65536;
@@ -94,6 +95,9 @@ struct UdpMoldIngestSource : IngestSource {
             const uint8_t* record = buf + read_offset + 2;
             read_offset += 2 + len;
             --remaining;
+            if (len == 0 || len < itch_min_length(record[0])) {
+                continue; // too short for its type: handlers would read past it
+            }
             return record;
         }
     }
