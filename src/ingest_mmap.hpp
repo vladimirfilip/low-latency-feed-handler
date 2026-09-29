@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cerrno>
+#include <cstring>
+#include <stdexcept>
 #include <string>
 #include <fcntl.h>
 #include <unistd.h>
@@ -22,11 +25,25 @@ struct mmap_buffer : IngestSource {
 
     mmap_buffer(const std::string& path) {
         fd = open(path.c_str(), O_RDONLY);
+        if (fd == -1)
+            throw std::runtime_error("open " + path + ": " + std::strerror(errno));
         struct stat sb;
-        fstat(fd, &sb);
+        if (fstat(fd, &sb) == -1) {
+            int err = errno;
+            ::close(fd);
+            throw std::runtime_error("fstat " + path + ": " + std::strerror(err));
+        }
         size = sb.st_size;
-        void* mapped = mmap(nullptr, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-        data = static_cast<const uint8_t*>(mapped);
+        data = nullptr;
+        if (size > 0) { // mmap rejects a zero length; an empty file just has no records
+            void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+            if (mapped == MAP_FAILED) {
+                int err = errno;
+                ::close(fd);
+                throw std::runtime_error("mmap " + path + ": " + std::strerror(err));
+            }
+            data = static_cast<const uint8_t*>(mapped);
+        }
         offset = 0;
         opened = true;
     }
