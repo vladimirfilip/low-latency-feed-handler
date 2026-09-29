@@ -76,7 +76,7 @@ inline std::runtime_error shm_error(const char* what) {
 // delete_shared() first.
 template<typename S>
 S* create_shared(const char* name) {
-    int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
+    int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
     if (fd == -1)
         throw shm_error("shm_open(create) failed");
 
