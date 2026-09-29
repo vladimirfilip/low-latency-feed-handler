@@ -56,8 +56,9 @@ struct mmap_buffer : IngestSource {
         if (offset > size - LENGTH_PREFIX_BYTES) {
             return nullptr;
         }
-        const uint16_t* big_endian_len = reinterpret_cast<const uint16_t*>(data + offset);
-        const uint16_t len = __builtin_bswap16(*big_endian_len);
+        uint16_t big_endian_len; // memcpy: prefixes of odd-length records sit at odd addresses
+        std::memcpy(&big_endian_len, data + offset, sizeof(big_endian_len));
+        const uint16_t len = __builtin_bswap16(big_endian_len);
         offset += LENGTH_PREFIX_BYTES;
         if (offset > size - len) {
             return nullptr;
