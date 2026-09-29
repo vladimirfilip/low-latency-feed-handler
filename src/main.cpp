@@ -9,6 +9,13 @@
 
 const std::string DATA_PATH = "data/03272019.NASDAQ_ITCH50.200MB";
 
+// Tells the compiler `value` is used, so the work producing it can't be
+// optimised out of the timed region.
+template <typename T>
+inline void do_not_optimize(const T& value) {
+    asm volatile("" : : "r"(&value) : "memory");
+}
+
 int main(int argc, char** argv) {
     ParsedArgs args = parse_args(argc, argv);
 
@@ -29,7 +36,8 @@ int main(int argc, char** argv) {
     const uint8_t* record;
     while ((record = source->next_record()) != nullptr) {
         uint64_t t0 = timer.now();
-        dispatch(record);
+        NormalisedMessage norm = dispatch(record);
+        do_not_optimize(norm);
         uint64_t t1 = timer.now();
         uint64_t delta = t1 - t0;
         hist.record(delta > timer.overhead_cycles ? delta - timer.overhead_cycles : 0);
