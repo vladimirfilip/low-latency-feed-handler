@@ -52,6 +52,35 @@ tool), `ipc_producer_ring`/`ipc_consumer_ring`, `ipc_producer_unix`/
 
 (swap `_ring` for `_unix` for the socket baseline).
 
+## Tests
+
+```bash
+tests/run_tests.sh
+```
+
+Builds everything with plain `g++` into `build/tests/` (no CMake or data
+download needed) and runs the whole suite; exits non-zero if any test fails.
+
+- `tests/test_parsing.cpp`: CLI args, ITCH struct layout, handlers and
+  dispatch, MoldUDP64 framing, and the mmap and UDP ingestion sources.
+- `tests/test_core.cpp`: the SPSC ring (including a two-thread ordering
+  stress test), the latency histogram, and the timers.
+- `tests/test_transports.cpp`: both IPC transports across real processes.
+  Covers the happy path in both launch orders, a peer dying, stale or
+  garbage shared-memory segments, two consumers competing for one ring,
+  and cleanup on scope exit.
+- `tests/integration_test.py`: drives the built binaries end to end on
+  synthetic ITCH data. Covers `feed_handler`, `replay` framing and pacing,
+  the producer/consumer pairs, killing either side mid-stream, bad inputs,
+  `bench/run_ipc_comparison.sh` (run from a throwaway copy with `cmake`
+  stubbed out, so it never writes to `bench/results/`), and build checks
+  (standalone headers, multi-TU linking, no warnings).
+
+The parsing and core tests also run under ASan/UBSan. Each C++ test runs in
+its own forked process with a deadline, so a crash or hang shows up as a
+failed test rather than stopping the run. The suite uses the same shared-memory
+and socket names as the benchmark, so don't run the two at the same time.
+
 ## Benchmarking
 
 Run `bash download_data.sh` first to fetch the NASDAQ sample feed into `data/`.
