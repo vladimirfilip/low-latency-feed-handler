@@ -105,6 +105,6 @@ void detach_shared(int fd, SPSCRingBuffer<T>* queue) {
     close(fd);
 }
 
-void delete_shared(const char SHM_NAME[]) {
+inline void delete_shared(const char SHM_NAME[]) {
     shm_unlink(SHM_NAME);
 }
