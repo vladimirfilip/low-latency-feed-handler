@@ -26,10 +26,12 @@ static int run(int argc, char** argv) {
     Histogram hist;
     NormalisedMessage msg;
     uint64_t received = 0;
+    bool saw_end = false;
 
     auto wall_start = std::chrono::steady_clock::now();
     while (transport.recv(msg)) {
         if (msg.msg_type == STREAM_END_MSG_TYPE) {
+            saw_end = true;
             break;
         }
         uint64_t t_observe = monotonic_ns();
@@ -47,6 +49,10 @@ static int run(int argc, char** argv) {
     std::printf("throughput: %.0f msgs/sec\n", throughput);
     if (argc > 1) {
         hist.write_csv(argv[1]);
+    }
+    if (!saw_end) {
+        std::fprintf(stderr, "consumer: producer went away before end of stream; results are partial\n");
+        return 1;
     }
     return 0;
 }
