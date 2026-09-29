@@ -72,24 +72,30 @@ struct UdpMoldIngestSource : IngestSource {
             return nullptr;
         }
         for (;;) {
-            if (remaining > 0 && read_offset + 2 > datagram_end) {
-                remaining = 0; // header claimed more sub-messages than arrived: drop the rest
+            if (remaining == 0) {
+                if (!recv_next_datagram()) {
+                    return nullptr;
+                }
+                continue;
             }
-            if (remaining > 0) {
-                break;
+            // Never trust the header's count or a sub-message's length past
+            // the bytes actually received: drop the rest of the datagram.
+            if (read_offset + 2 > datagram_end) {
+                remaining = 0;
+                continue;
             }
-            if (!recv_next_datagram()) {
-                return nullptr;
+            uint16_t len;
+            std::memcpy(&len, buf + read_offset, 2);
+            len = ntohs(len);
+            if (read_offset + 2 + len > datagram_end) {
+                remaining = 0;
+                continue;
             }
+            const uint8_t* record = buf + read_offset + 2;
+            read_offset += 2 + len;
+            --remaining;
+            return record;
         }
-        uint16_t len;
-        std::memcpy(&len, buf + read_offset, 2);
-        len = ntohs(len);
-        read_offset += 2;
-        const uint8_t* record = buf + read_offset;
-        read_offset += len;
-        --remaining;
-        return record;
     }
 
     void close() override {
