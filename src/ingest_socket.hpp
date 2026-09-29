@@ -42,6 +42,7 @@ struct UdpMoldIngestSource : IngestSource {
     int fd = -1;
     uint8_t buf[UDP_MAX_DATAGRAM];
     size_t read_offset = 0;      // next unread byte within buf, past the Mold header
+    size_t datagram_end = 0;     // bytes received in the current datagram
     uint16_t remaining = 0;      // sub-messages left unread in the current datagram
     bool ended = false;
 
@@ -70,7 +71,13 @@ struct UdpMoldIngestSource : IngestSource {
         if (ended) {
             return nullptr;
         }
-        while (remaining == 0) {
+        for (;;) {
+            if (remaining > 0 && read_offset + 2 > datagram_end) {
+                remaining = 0; // header claimed more sub-messages than arrived: drop the rest
+            }
+            if (remaining > 0) {
+                break;
+            }
             if (!recv_next_datagram()) {
                 return nullptr;
             }
@@ -117,6 +124,7 @@ private:
 
             remaining = msg_count;
             read_offset = MOLD_HEADER_BYTES;
+            datagram_end = static_cast<size_t>(n);
             return true;
         }
     }
