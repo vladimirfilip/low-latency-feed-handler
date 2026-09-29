@@ -64,6 +64,7 @@ struct Histogram {
 
     void record(uint64_t delta_cycles) {
         int bucket = delta_cycles == 0 ? 0 : (64 - __builtin_clzll(delta_cycles));
+        if (bucket >= kBuckets) bucket = kBuckets - 1; // top bucket also holds values >= 2^63
         counts[bucket]++;
         total++;
         if (delta_cycles > max_cycles) max_cycles = delta_cycles;
