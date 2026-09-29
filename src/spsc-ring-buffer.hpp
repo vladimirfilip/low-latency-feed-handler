@@ -1,12 +1,16 @@
 #pragma once
 
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <new>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 constexpr size_t CACHE_LINE = 64;
@@ -60,51 +64,80 @@ struct SPSCRingBuffer {
     }
 };
 
-template<typename T>
-std::pair<int, SPSCRingBuffer<T>*> create_shared(const char SHM_NAME[]) {
-    int fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    if (fd == -1)
-        throw std::runtime_error("shm_open failed");
+// Shared-memory helpers, templated on the whole mapped object. The fd is
+// closed as soon as the mapping exists; the mapping keeps the segment alive.
 
-    if (ftruncate(fd, sizeof(SPSCRingBuffer<T>)) == -1)
-        throw std::runtime_error("ftruncate failed");
-
-    void* mem = mmap(nullptr, sizeof(SPSCRingBuffer<T>), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (mem == MAP_FAILED)
-        throw std::runtime_error("mmap failed");
-
-    auto* queue = new (mem) SPSCRingBuffer<T>;
-    return {fd, queue};
+inline std::runtime_error shm_error(const char* what) {
+    return std::runtime_error(std::string(what) + ": " + std::strerror(errno));
 }
 
-template<typename T>
-std::pair<int, SPSCRingBuffer<T>*> attach_shared(const char SHM_NAME[]) {
-    int fd = shm_open(
-        SHM_NAME,
-        O_RDWR,
-        0666);
+// Creates a fresh segment and constructs S in it. O_EXCL: a leftover segment
+// of the same name is an error, never silently reused; callers
+// delete_shared() first.
+template<typename S>
+S* create_shared(const char* name) {
+    int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
     if (fd == -1)
-        throw std::runtime_error("shm_open failed");
+        throw shm_error("shm_open(create) failed");
 
-    void* mem = mmap(
-        nullptr,
-        sizeof(SPSCRingBuffer<T>),
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        fd,
-        0);
-    if (mem == MAP_FAILED)
-        throw std::runtime_error("mmap failed");
+    if (ftruncate(fd, sizeof(S)) == -1) {
+        auto err = shm_error("ftruncate failed");
+        close(fd);
+        shm_unlink(name);
+        throw err;
+    }
 
-    return {fd, static_cast<SPSCRingBuffer<T>*>(mem)};
-}
-
-template<typename T>
-void detach_shared(int fd, SPSCRingBuffer<T>* queue) {
-    munmap(queue, sizeof(SPSCRingBuffer<T>));
+    void* mem = mmap(nullptr, sizeof(S), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mem == MAP_FAILED) {
+        auto err = shm_error("mmap failed");
+        close(fd);
+        shm_unlink(name);
+        throw err;
+    }
     close(fd);
+
+    return new (mem) S;
 }
 
-inline void delete_shared(const char SHM_NAME[]) {
-    shm_unlink(SHM_NAME);
+// Maps an existing segment, or returns nullptr if it isn't there yet. A
+// segment smaller than S also counts as "not yet": the creator is between
+// shm_open() and ftruncate(), and touching that mapping would SIGBUS.
+template<typename S>
+S* attach_shared(const char* name) {
+    int fd = shm_open(name, O_RDWR, 0);
+    if (fd == -1) {
+        if (errno == ENOENT)
+            return nullptr;
+        throw shm_error("shm_open(attach) failed");
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) == -1) {
+        auto err = shm_error("fstat failed");
+        close(fd);
+        throw err;
+    }
+    if (st.st_size < static_cast<off_t>(sizeof(S))) {
+        close(fd);
+        return nullptr;
+    }
+
+    void* mem = mmap(nullptr, sizeof(S), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mem == MAP_FAILED) {
+        auto err = shm_error("mmap failed");
+        close(fd);
+        throw err;
+    }
+    close(fd);
+
+    return static_cast<S*>(mem);
+}
+
+template<typename S>
+void detach_shared(S* seg) {
+    munmap(seg, sizeof(S));
+}
+
+inline void delete_shared(const char* name) {
+    shm_unlink(name);
 }

@@ -11,15 +11,14 @@
 constexpr char RING_SHM_NAME[] = "/feed_handler_norm_ring";
 constexpr int BUSY_WAIT_ITERS = 1000;
 
+using NormRing = SPSCRingBuffer<NormalisedMessage>;
+
 struct RingProducerTransport {
-    int fd = -1;
-    SPSCRingBuffer<NormalisedMessage>* ring = nullptr;
+    NormRing* ring = nullptr;
 
     void open() {
         delete_shared(RING_SHM_NAME);
-        auto [f, r] = create_shared<NormalisedMessage>(RING_SHM_NAME);
-        fd = f;
-        ring = r;
+        ring = create_shared<NormRing>(RING_SHM_NAME);
     }
 
     void send(const NormalisedMessage& msg) {
@@ -34,25 +33,18 @@ struct RingProducerTransport {
     }
 
     void close() {
-        detach_shared(fd, ring);
+        detach_shared(ring);
         delete_shared(RING_SHM_NAME);
     }
 };
 
 struct RingConsumerTransport {
-    int fd = -1;
-    SPSCRingBuffer<NormalisedMessage>* ring = nullptr;
+    NormRing* ring = nullptr;
 
+    // Blocks until the producer's segment exists at full size.
     void open() {
-        for (;;) {
-            try {
-                auto [f, r] = attach_shared<NormalisedMessage>(RING_SHM_NAME);
-                fd = f;
-                ring = r;
-                return;
-            } catch (const std::runtime_error&) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
+        while ((ring = attach_shared<NormRing>(RING_SHM_NAME)) == nullptr) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 
@@ -68,6 +60,6 @@ struct RingConsumerTransport {
     }
 
     void close() {
-        detach_shared(fd, ring);
+        detach_shared(ring);
     }
 };
