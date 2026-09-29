@@ -61,6 +61,8 @@ run_variant() {
     if ! wait "$producer_pid"; then
         echo "producer (${variant}) failed:" >&2
         cat "$producer_log" >&2
+        kill "$consumer_pid" 2>/dev/null # it would otherwise wait forever for a producer
+        wait "$consumer_pid" 2>/dev/null
         exit 1
     fi
     if ! wait "$consumer_pid"; then
