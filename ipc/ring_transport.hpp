@@ -58,6 +58,11 @@ inline bool process_alive(pid_t pid) {
 struct RingProducerTransport {
     RingSegment* seg = nullptr;
 
+    RingProducerTransport() = default;
+    RingProducerTransport(const RingProducerTransport&) = delete;
+    RingProducerTransport& operator=(const RingProducerTransport&) = delete;
+    ~RingProducerTransport() { close(); }
+
     // Blocks until a consumer has claimed the ring.
     void open() {
         delete_shared(RING_SHM_NAME); // clear any segment a crashed run left behind
@@ -81,13 +86,21 @@ struct RingProducerTransport {
     }
 
     void close() {
+        if (seg == nullptr)
+            return;
         detach_shared(seg);
+        seg = nullptr;
         delete_shared(RING_SHM_NAME);
     }
 };
 
 struct RingConsumerTransport {
     RingSegment* seg = nullptr;
+
+    RingConsumerTransport() = default;
+    RingConsumerTransport(const RingConsumerTransport&) = delete;
+    RingConsumerTransport& operator=(const RingConsumerTransport&) = delete;
+    ~RingConsumerTransport() { close(); }
 
     // Blocks until it has claimed a live producer's ring.
     void open() {
@@ -108,7 +121,10 @@ struct RingConsumerTransport {
     }
 
     void close() {
+        if (seg == nullptr)
+            return;
         detach_shared(seg);
+        seg = nullptr;
     }
 
 private:
