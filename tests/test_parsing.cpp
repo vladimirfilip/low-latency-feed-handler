@@ -119,6 +119,8 @@ TEST("itch structs: sizes match the ITCH 5.0 spec") {
     CHECK_EQ(sizeof(OrderCancel), size_t{23});
     CHECK_EQ(sizeof(OrderDelete), size_t{19});
     CHECK_EQ(sizeof(TradeNonCross), size_t{44});
+    CHECK_EQ(sizeof(OrderReplace), size_t{35});
+    CHECK_EQ(sizeof(OrderExecutedWithPrice), size_t{36});
 }
 
 TEST("itch structs: common header fields sit at spec offsets") {

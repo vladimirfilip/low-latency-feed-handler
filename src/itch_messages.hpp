@@ -79,6 +79,18 @@ struct OrderReplace {
     uint32_t price;
 };
 
+struct OrderExecutedWithPrice {
+    char msg_type; // = 'C'
+    uint16_t stock_locate;
+    uint16_t tracking_no;
+    uint8_t timestamp[6];
+    uint64_t order_reference_no;
+    uint32_t executed_shares;
+    uint64_t match_number;
+    char printable;
+    uint32_t execution_price;
+};
+
 struct OrderCancel {
     char msg_type; // = 'X'
     uint16_t stock_locate;

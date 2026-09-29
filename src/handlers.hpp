@@ -78,6 +78,18 @@ inline NormalisedMessage order_executed(const uint8_t* record) {
     return norm;
 }
 
+inline NormalisedMessage order_executed_with_price(const uint8_t* record) {
+    const auto* msg = reinterpret_cast<const OrderExecutedWithPrice*>(record);
+    NormalisedMessage norm;
+    norm.msg_type     = msg->msg_type;
+    norm.stock_locate = __builtin_bswap16(msg->stock_locate);
+    norm.timestamp_ns = read_timestamp48(msg->timestamp);
+    norm.order_ref    = __builtin_bswap64(msg->order_reference_no);
+    norm.shares       = __builtin_bswap32(msg->executed_shares);
+    norm.price        = __builtin_bswap32(msg->execution_price);
+    return norm;
+}
+
 inline NormalisedMessage order_replace(const uint8_t* record) {
     const auto* msg = reinterpret_cast<const OrderReplace*>(record);
     NormalisedMessage norm;
