@@ -6,6 +6,7 @@
 // needed, but unlike the ring buffer, every message still costs a syscall
 // plus a kernel-mediated copy on each side.
 
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <stdexcept>
@@ -53,9 +54,14 @@ struct UnixSocketConsumerTransport {
             throw std::runtime_error("accept failed");
     }
 
+    // Returns false at end of stream (peer closed) or on a socket error.
     bool recv(NormalisedMessage& msg) {
-        ssize_t n = ::recv(conn_fd, &msg, sizeof(msg), MSG_WAITALL);
-        return n == static_cast<ssize_t>(sizeof(msg));
+        for (;;) {
+            ssize_t n = ::recv(conn_fd, &msg, sizeof(msg), MSG_WAITALL);
+            if (n < 0 && errno == EINTR)
+                continue; // interrupted by a signal, not end of stream
+            return n == static_cast<ssize_t>(sizeof(msg));
+        }
     }
 
     void close() {
@@ -94,7 +100,10 @@ struct UnixSocketProducerTransport {
     }
 
     void send(const NormalisedMessage& msg) {
-        ssize_t n = ::send(fd, &msg, sizeof(msg), 0);
+        ssize_t n;
+        do {
+            n = ::send(fd, &msg, sizeof(msg), 0);
+        } while (n < 0 && errno == EINTR);
         if (n != static_cast<ssize_t>(sizeof(msg)))
             throw std::runtime_error("send failed / short write");
     }
