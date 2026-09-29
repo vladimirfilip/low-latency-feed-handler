@@ -58,11 +58,12 @@ int main(int argc, char** argv) {
 
     mmap_buffer buffer(data_path);
 
-    uint8_t packet[MOLD_HEADER_BYTES + MAX_PACKET_BYTES + 4096]; // header + batch, generous margin over the byte cap
+    uint8_t packet[MOLD_HEADER_BYTES + MAX_PACKET_BYTES];
     size_t packet_len = MOLD_HEADER_BYTES;
     size_t batch_count = 0;
     uint64_t seq = 1;
     uint64_t published = 0;
+    uint64_t oversized = 0;
 
     bool have_batch_ts = false;
     uint64_t batch_ts_ns = 0;
@@ -94,6 +95,10 @@ int main(int argc, char** argv) {
     const uint8_t* record;
     while ((record = buffer.next_record()) != nullptr) {
         uint16_t len = buffer.last_len;
+        if (size_t{2} + len > MAX_PACKET_BYTES) {
+            ++oversized; // can't fit in any datagram; real ITCH records are < 100 bytes
+            continue;
+        }
         uint64_t msg_ts_ns = read_timestamp48(record + 5);
 
         if (!have_first_ts) {
@@ -138,6 +143,10 @@ int main(int argc, char** argv) {
     sendto(fd, end_packet, sizeof(end_packet), 0,
            reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
 
+    if (oversized > 0) {
+        std::fprintf(stderr, "replay: skipped %llu records too large for one datagram\n",
+                     static_cast<unsigned long long>(oversized));
+    }
     std::fprintf(stderr, "replay: sent %llu records to %s:%u (%s)\n",
                  static_cast<unsigned long long>(published), host.c_str(), port,
                  paced ? "paced" : "max-rate");
