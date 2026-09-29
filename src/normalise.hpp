@@ -27,7 +27,7 @@ struct NormalisedMessage {
     uint16_t stock_locate = UNPOPULATED;
     char msg_type = UNPOPULATED;
     char side = UNPOPULATED;
-    char padding[20];
+    char padding[20] = {}; // zeroed: all 64 bytes are copied across IPC
 };
 
 static_assert(sizeof(NormalisedMessage) == 64, "NormalisedMessage must fit one cache line");
