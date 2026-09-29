@@ -15,6 +15,10 @@
 // it, and a short stream can't be published and unlinked before the
 // consumer attaches. Rejecting segments whose producer is dead skips those
 // left behind by a crashed run.
+//
+// Once running, each side checks the other is alive after BUSY_WAIT_ITERS
+// full/empty polls (never per message), so a dead peer ends the stream
+// instead of leaving the survivor spinning forever.
 
 #include <chrono>
 #include <thread>
@@ -57,6 +61,7 @@ inline bool process_alive(pid_t pid) {
 
 struct RingProducerTransport {
     RingSegment* seg = nullptr;
+    pid_t consumer_pid = 0;
 
     RingProducerTransport() = default;
     RingProducerTransport(const RingProducerTransport&) = delete;
@@ -69,11 +74,12 @@ struct RingProducerTransport {
         seg = create_shared<RingSegment>(RING_SHM_NAME);
         seg->ctl.producer_pid.store(getpid(), std::memory_order_relaxed);
         seg->ctl.magic.store(RING_MAGIC, std::memory_order_release);
-        while (seg->ctl.consumer_pid.load(std::memory_order_acquire) == 0) {
+        while ((consumer_pid = seg->ctl.consumer_pid.load(std::memory_order_acquire)) == 0) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
     }
 
+    // Throws if the ring stays full and the consumer has exited.
     void send(const NormalisedMessage& msg) {
         for (;;) {
             for (int i = 0; i < BUSY_WAIT_ITERS; i++) {
@@ -81,6 +87,8 @@ struct RingProducerTransport {
                     return;
                 _mm_pause();
             }
+            if (!process_alive(consumer_pid))
+                throw std::runtime_error("ring consumer exited");
             std::this_thread::yield();
         }
     }
@@ -96,6 +104,7 @@ struct RingProducerTransport {
 
 struct RingConsumerTransport {
     RingSegment* seg = nullptr;
+    pid_t producer_pid = 0;
 
     RingConsumerTransport() = default;
     RingConsumerTransport(const RingConsumerTransport&) = delete;
@@ -109,6 +118,7 @@ struct RingConsumerTransport {
         }
     }
 
+    // Returns false once the ring is empty and the producer has exited.
     bool recv(NormalisedMessage& msg) {
         for (;;) {
             for (int i = 0; i < BUSY_WAIT_ITERS; i++) {
@@ -116,6 +126,8 @@ struct RingConsumerTransport {
                     return true;
                 _mm_pause();
             }
+            if (!process_alive(producer_pid))
+                return seg->ring.pop(msg); // it may have pushed more before dying
             std::this_thread::yield();
         }
     }
@@ -141,13 +153,15 @@ private:
             return false; // producer still constructing it
         }
 
+        pid_t producer = s->ctl.producer_pid.load(std::memory_order_relaxed);
         pid_t unclaimed = 0;
-        if (!process_alive(s->ctl.producer_pid.load(std::memory_order_relaxed)) ||
+        if (!process_alive(producer) ||
             !s->ctl.consumer_pid.compare_exchange_strong(unclaimed, getpid(), std::memory_order_acq_rel)) {
             detach_shared(s); // stale segment from a dead producer, or another consumer owns it
             return false;
         }
         seg = s;
+        producer_pid = producer;
         return true;
     }
 };
