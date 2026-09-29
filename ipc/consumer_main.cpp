@@ -6,6 +6,7 @@
 // timestamps are compared across process boundaries.
 #include <chrono>
 #include <cstdio>
+#include <exception>
 
 #include <latency_histogram.hpp>
 #include <normalise.hpp>
@@ -18,7 +19,7 @@ using ConsumerTransport = UnixSocketConsumerTransport;
 using ConsumerTransport = RingConsumerTransport;
 #endif
 
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
     ConsumerTransport transport;
     transport.open();
 
@@ -48,4 +49,13 @@ int main(int argc, char** argv) {
         hist.write_csv(argv[1]);
     }
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "consumer: %s\n", e.what());
+        return 1;
+    }
 }

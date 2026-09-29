@@ -4,6 +4,7 @@
 // new piece is timestamping each record at ingest and handing the
 // normalized result off to whichever transport this binary was built with.
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 
@@ -24,7 +25,7 @@ using ProducerTransport = RingProducerTransport;
 
 const std::string DATA_PATH = "data/03272019.NASDAQ_ITCH50.200MB";
 
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
     ParsedArgs args = parse_args(argc, argv);
 
     std::unique_ptr<IngestSource> source;
@@ -67,4 +68,15 @@ int main(int argc, char** argv) {
 
     transport.close();
     return 0;
+}
+
+int main(int argc, char** argv) {
+    // Caught here rather than left to std::terminate so the stack unwinds
+    // and the transport's destructor releases its shm segment / socket.
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "producer: %s\n", e.what());
+        return 1;
+    }
 }
