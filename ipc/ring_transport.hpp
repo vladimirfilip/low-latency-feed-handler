@@ -3,6 +3,8 @@
 #include <chrono>
 #include <thread>
 
+#include <immintrin.h>
+
 #include <normalise.hpp>
 #include <spsc-ring-buffer.hpp>
 
