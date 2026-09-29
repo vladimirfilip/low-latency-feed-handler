@@ -78,6 +78,19 @@ inline NormalisedMessage order_executed(const uint8_t* record) {
     return norm;
 }
 
+inline NormalisedMessage order_replace(const uint8_t* record) {
+    const auto* msg = reinterpret_cast<const OrderReplace*>(record);
+    NormalisedMessage norm;
+    norm.msg_type       = msg->msg_type;
+    norm.stock_locate   = __builtin_bswap16(msg->stock_locate);
+    norm.timestamp_ns   = read_timestamp48(msg->timestamp);
+    norm.order_ref      = __builtin_bswap64(msg->new_order_reference_no);
+    norm.orig_order_ref = __builtin_bswap64(msg->original_order_reference_no);
+    norm.price          = __builtin_bswap32(msg->price);
+    norm.shares         = __builtin_bswap32(msg->shares);
+    return norm;
+}
+
 inline NormalisedMessage order_cancel(const uint8_t* record) {
     const auto* msg = reinterpret_cast<const OrderCancel*>(record);
     NormalisedMessage norm;

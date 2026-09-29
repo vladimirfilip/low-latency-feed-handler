@@ -21,6 +21,7 @@ inline NormalisedMessage dispatch(const uint8_t* record) {
         case 'A': return add_order_no_mpid(record);
         case 'F': return add_order_with_mpid(record);
         case 'E': return order_executed(record);
+        case 'U': return order_replace(record);
         case 'X': return order_cancel(record);
         case 'D': return order_delete(record);
         case 'P': return trade_non_cross(record);

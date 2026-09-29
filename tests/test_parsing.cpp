@@ -269,6 +269,8 @@ TEST("dispatch: U order replace is normalised, not dropped") {
                                  "published and downstream can't track the order");
     CHECK_EQ(m.stock_locate, uint16_t{8});
     CHECK_EQ(m.timestamp_ns, uint64_t{500});
+    CHECK_EQ(m.order_ref, uint64_t{2222});
+    CHECK_EQ(m.orig_order_ref, uint64_t{1111});
     CHECK_EQ(m.shares, uint32_t{400});
     CHECK_EQ(m.price, uint32_t{1'000'100});
 }

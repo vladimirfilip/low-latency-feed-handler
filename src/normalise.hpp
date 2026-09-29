@@ -21,12 +21,13 @@ struct NormalisedMessage {
     uint64_t timestamp_ns = UNPOPULATED;   // wire timestamp: ITCH ns-since-midnight
     uint64_t order_ref = UNPOPULATED;
     uint64_t ingest_ns = UNPOPULATED;      // CLOCK_MONOTONIC ns when the producer ingested this record
+    uint64_t orig_order_ref = UNPOPULATED; // 'U' only: the order being replaced (order_ref is the new one)
     uint32_t price = UNPOPULATED;
     uint32_t shares = UNPOPULATED;
     uint16_t stock_locate = UNPOPULATED;
     char msg_type = UNPOPULATED;
     char side = UNPOPULATED;
-    char padding[28];
+    char padding[20];
 };
 
 static_assert(sizeof(NormalisedMessage) == 64, "NormalisedMessage must fit one cache line");

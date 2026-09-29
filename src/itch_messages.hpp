@@ -68,6 +68,17 @@ struct OrderExecuted {
     uint64_t match_number;
 };
 
+struct OrderReplace {
+    char msg_type; // = 'U'
+    uint16_t stock_locate;
+    uint16_t tracking_no;
+    uint8_t timestamp[6];
+    uint64_t original_order_reference_no;
+    uint64_t new_order_reference_no;
+    uint32_t shares;
+    uint32_t price;
+};
+
 struct OrderCancel {
     char msg_type; // = 'X'
     uint16_t stock_locate;
