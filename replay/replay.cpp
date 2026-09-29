@@ -16,6 +16,7 @@
 // one timestamp.
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -35,7 +36,7 @@ constexpr char SESSION_ID[MOLD_SESSION_BYTES] = {'R', 'E', 'P', 'L', 'A', 'Y', '
 
 const std::string DEFAULT_DATA_PATH = "data/03272019.NASDAQ_ITCH50.200MB";
 
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
     ParsedArgs args = parse_args(argc, argv);
     const std::string host = args.get("host", "127.0.0.1");
     const uint16_t port = static_cast<uint16_t>(std::stoi(args.get("port", "30001")));
@@ -153,4 +154,13 @@ int main(int argc, char** argv) {
 
     ::close(fd);
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "replay: %s\n", e.what());
+        return 1;
+    }
 }
