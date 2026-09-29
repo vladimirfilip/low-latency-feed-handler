@@ -48,6 +48,10 @@ struct mmap_buffer : IngestSource {
         opened = true;
     }
 
+    mmap_buffer(const mmap_buffer&) = delete;
+    mmap_buffer& operator=(const mmap_buffer&) = delete;
+    ~mmap_buffer() override { close(); }
+
     const uint8_t* next_record() override {
         if (offset > size - LENGTH_PREFIX_BYTES) {
             return nullptr;
@@ -65,7 +69,12 @@ struct mmap_buffer : IngestSource {
         return res;
     }
 
+    // Unmaps the file: pointers from next_record() are invalid afterwards.
     void close() override {
+        if (!opened)
+            return;
+        if (data != nullptr)
+            munmap(const_cast<uint8_t*>(data), size);
         ::close(fd);
         opened = false;
     }

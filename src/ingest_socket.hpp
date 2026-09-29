@@ -64,7 +64,7 @@ struct UdpMoldIngestSource : IngestSource {
     // Pointers returned by next_record() point into `buf`, which the next
     // datagram overwrites — same "use before the next call" contract the
     // dispatch loop already follows for every ingestion source, but unlike
-    // mmap_buffer's pointers (valid for the process's whole lifetime) these
+    // mmap_buffer's pointers (valid until it is closed) these
     // specifically are not.
     const uint8_t* next_record() override {
         if (ended) {
