@@ -48,10 +48,10 @@ run_variant() {
     local producer_log="$TMPDIR/producer_${variant}.log"
     local consumer_log="$TMPDIR/consumer_${variant}.log"
 
-    # Retry loops in both transports (ring: attach-until-created; unix:
-    # connect-until-listening) make launch order safe either way — the
-    # consumer is started first here only so it's ready to instrument from
-    # the very first message rather than because correctness needs it.
+    # Launch order doesn't matter: the ring producer waits for a consumer to
+    # claim its segment before publishing, and the unix producer retries
+    # connect() until the consumer is listening. Either way no message is
+    # timestamped before the consumer can read it.
     taskset -c "$CONSUMER_CORE" "$consumer_bin" "$hist_out" >"$consumer_log" 2>&1 &
     local consumer_pid=$!
 
