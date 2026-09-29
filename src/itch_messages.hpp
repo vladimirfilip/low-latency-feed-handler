@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #pragma pack(push, 1)
@@ -122,3 +123,25 @@ struct TradeNonCross {
 };
 
 #pragma pack(pop)
+
+// Every ITCH message starts with the same 11 bytes: type, stock locate,
+// tracking number and 48-bit timestamp.
+constexpr size_t ITCH_HEADER_BYTES = 11;
+
+// Shortest valid record of the given type. Ingestion drops anything shorter,
+// since handlers (and replay's timestamp read) read a fixed number of bytes.
+inline size_t itch_min_length(uint8_t type) {
+    switch (type) {
+        case 'S': return sizeof(SystemEvent);
+        case 'R': return sizeof(StockDirectory);
+        case 'A': return sizeof(AddOrderNoMPID);
+        case 'F': return sizeof(AddOrderWithMPID);
+        case 'E': return sizeof(OrderExecuted);
+        case 'C': return sizeof(OrderExecutedWithPrice);
+        case 'U': return sizeof(OrderReplace);
+        case 'X': return sizeof(OrderCancel);
+        case 'D': return sizeof(OrderDelete);
+        case 'P': return sizeof(TradeNonCross);
+        default: return ITCH_HEADER_BYTES;
+    }
+}

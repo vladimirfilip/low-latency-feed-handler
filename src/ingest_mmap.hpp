@@ -12,6 +12,7 @@
 #include <cassert>
 
 #include <ingest_source.hpp>
+#include <itch_messages.hpp>
 
 #define LENGTH_PREFIX_BYTES 2
 
@@ -52,22 +53,28 @@ struct mmap_buffer : IngestSource {
     mmap_buffer& operator=(const mmap_buffer&) = delete;
     ~mmap_buffer() override { close(); }
 
+    // Skips records shorter than their type's wire size.
     const uint8_t* next_record() override {
-        if (offset > size - LENGTH_PREFIX_BYTES) {
-            return nullptr;
+        for (;;) {
+            if (offset > size - LENGTH_PREFIX_BYTES) {
+                return nullptr;
+            }
+            uint16_t big_endian_len; // memcpy: prefixes of odd-length records sit at odd addresses
+            std::memcpy(&big_endian_len, data + offset, sizeof(big_endian_len));
+            const uint16_t len = __builtin_bswap16(big_endian_len);
+            offset += LENGTH_PREFIX_BYTES;
+            if (offset > size - len) {
+                return nullptr;
+            }
+            const uint8_t* res = data + offset;
+            offset += len;
+            assert(offset <= size);
+            if (len == 0 || len < itch_min_length(res[0])) {
+                continue;
+            }
+            last_len = len;
+            return res;
         }
-        uint16_t big_endian_len; // memcpy: prefixes of odd-length records sit at odd addresses
-        std::memcpy(&big_endian_len, data + offset, sizeof(big_endian_len));
-        const uint16_t len = __builtin_bswap16(big_endian_len);
-        offset += LENGTH_PREFIX_BYTES;
-        if (offset > size - len) {
-            return nullptr;
-        }
-        const uint8_t* res = data + offset;
-        offset += len;
-        last_len = len;
-        assert(offset <= size);
-        return res;
     }
 
     // Unmaps the file: pointers from next_record() are invalid afterwards.
