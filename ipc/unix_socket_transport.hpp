@@ -29,6 +29,11 @@ struct UnixSocketConsumerTransport {
     int listen_fd = -1;
     int conn_fd = -1;
 
+    UnixSocketConsumerTransport() = default;
+    UnixSocketConsumerTransport(const UnixSocketConsumerTransport&) = delete;
+    UnixSocketConsumerTransport& operator=(const UnixSocketConsumerTransport&) = delete;
+    ~UnixSocketConsumerTransport() { close(); }
+
     // Server side: binds and blocks in accept() until the producer connects.
     void open() {
         unlink(UNIX_SOCKET_PATH);
@@ -54,14 +59,23 @@ struct UnixSocketConsumerTransport {
     }
 
     void close() {
-        ::close(conn_fd);
+        if (listen_fd == -1)
+            return;
+        if (conn_fd != -1)
+            ::close(conn_fd);
         ::close(listen_fd);
+        conn_fd = listen_fd = -1;
         unlink(UNIX_SOCKET_PATH);
     }
 };
 
 struct UnixSocketProducerTransport {
     int fd = -1;
+
+    UnixSocketProducerTransport() = default;
+    UnixSocketProducerTransport(const UnixSocketProducerTransport&) = delete;
+    UnixSocketProducerTransport& operator=(const UnixSocketProducerTransport&) = delete;
+    ~UnixSocketProducerTransport() { close(); }
 
     // Client side: retries connect() until the consumer's listen socket
     // exists, so launch order between the two processes doesn't matter.
@@ -86,6 +100,9 @@ struct UnixSocketProducerTransport {
     }
 
     void close() {
+        if (fd == -1)
+            return;
         ::close(fd);
+        fd = -1;
     }
 };
