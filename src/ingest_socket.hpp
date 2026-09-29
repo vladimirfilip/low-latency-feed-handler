@@ -44,6 +44,8 @@ struct UdpMoldIngestSource : IngestSource {
     uint8_t buf[UDP_MAX_DATAGRAM];
     size_t read_offset = 0;      // next unread byte within buf, past the Mold header
     size_t datagram_end = 0;     // bytes received in the current datagram
+    uint64_t next_seq = 0;       // sequence number expected next; 0 until the first datagram
+    uint16_t already_seen = 0;   // leading sub-messages of this datagram delivered before
     uint16_t remaining = 0;      // sub-messages left unread in the current datagram
     bool ended = false;
 
@@ -95,6 +97,10 @@ struct UdpMoldIngestSource : IngestSource {
             const uint8_t* record = buf + read_offset + 2;
             read_offset += 2 + len;
             --remaining;
+            if (already_seen > 0) {
+                --already_seen;
+                continue;
+            }
             if (len == 0 || len < itch_min_length(record[0])) {
                 continue; // too short for its type: handlers would read past it
             }
@@ -131,6 +137,17 @@ private:
             if (msg_count == 0) {
                 continue; // heartbeat: no messages in this datagram
             }
+
+            // Sub-messages carry sequence numbers seq .. seq+count-1. Drop
+            // what was already delivered (duplicate or overlapping datagram).
+            uint64_t seq;
+            std::memcpy(&seq, buf + MOLD_SESSION_BYTES, 8);
+            seq = __builtin_bswap64(seq);
+            if (next_seq != 0 && seq + msg_count <= next_seq) {
+                continue;
+            }
+            already_seen = (next_seq > seq) ? static_cast<uint16_t>(next_seq - seq) : 0;
+            next_seq = seq + msg_count;
 
             remaining = msg_count;
             read_offset = MOLD_HEADER_BYTES;
