@@ -4,7 +4,10 @@
 #include <x86intrin.h>
 #include <chrono>
 #include <thread>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
+#include <stdexcept>
 #include <string>
 #include <time.h>
 
@@ -84,6 +87,13 @@ struct Histogram {
         return max_cycles;
     }
 
+    static std::FILE* open_csv(const std::string& path) {
+        std::FILE* f = std::fopen(path.c_str(), "w");
+        if (f == nullptr)
+            throw std::runtime_error("can't write " + path + ": " + std::strerror(errno));
+        return f;
+    }
+
     void print(const RdtscTimer& timer) const {
         auto to_ns = [&](uint64_t cycles) {
             return static_cast<double>(cycles) / timer.cycles_per_ns;
@@ -111,7 +121,7 @@ struct Histogram {
         for (int b = 0; b < kBuckets; ++b) {
             if (counts[b] > 0) highest = b;
         }
-        std::FILE* f = std::fopen(path.c_str(), "w");
+        std::FILE* f = open_csv(path);
         std::fprintf(f, "bucket_lower_ns,bucket_upper_ns,count\n");
         for (int b = 0; b <= highest; ++b) {
             uint64_t lower_cycles = b == 0 ? 0 : (1ull << (b - 1));
@@ -140,7 +150,7 @@ struct Histogram {
         for (int b = 0; b < kBuckets; ++b) {
             if (counts[b] > 0) highest = b;
         }
-        std::FILE* f = std::fopen(path.c_str(), "w");
+        std::FILE* f = open_csv(path);
         std::fprintf(f, "bucket_lower_ns,bucket_upper_ns,count\n");
         for (int b = 0; b <= highest; ++b) {
             uint64_t lower_ns = b == 0 ? 0 : (1ull << (b - 1));
