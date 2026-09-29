@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 
@@ -16,7 +18,7 @@ inline void do_not_optimize(const T& value) {
     asm volatile("" : : "r"(&value) : "memory");
 }
 
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
     ParsedArgs args = parse_args(argc, argv);
 
     std::unique_ptr<IngestSource> source;
@@ -49,4 +51,13 @@ int main(int argc, char** argv) {
         hist.write_csv(timer, args.positional[0]);
     }
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "feed_handler: %s\n", e.what());
+        return 1;
+    }
 }

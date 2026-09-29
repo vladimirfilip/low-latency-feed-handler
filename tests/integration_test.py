@@ -272,21 +272,23 @@ class FeedHandler(Base):
                         "expected a clean non-zero exit, got %s\n%s" % (describe_rc(rc), out))
 
     def test_timed_region_contains_the_dispatch(self):
-        # main() times `dispatch(record)` between two rdtscp reads. If the
+        # feed_handler times `dispatch(record)` between two rdtscp reads. If the
         # result isn't consumed the compiler deletes the call at -O3 and the
         # benchmark times nothing. dispatch() switches on record[0], so the
         # timed region must contain at least one branch or call.
         dis = subprocess.run(["objdump", "-d", "--no-show-raw-insn", "-C", self.bin("feed_handler")],
                              capture_output=True, text=True, check=True).stdout
-        main = re.search(r"<main>:\n(.*?)\n\n", dis, re.S)
-        self.assertIsNotNone(main, "couldn't find main in the disassembly")
+        # Every function that reads the TSC, except the timer's own calibration.
+        funcs = {m.group(1): m.group(2) for m in re.finditer(r"^[0-9a-f]+ <(.*?)>:\n(.*?)\n\n", dis, re.M | re.S)}
+        timed = {name: body for name, body in funcs.items() if "rdtscp" in body and "calibrate" not in name}
+        self.assertEqual(len(timed), 1, "can't identify the timed region: rdtscp in %s" % sorted(timed))
+        body = next(iter(timed.values()))
         insns = [re.sub(r"^(notrack|bnd)\s+", "", l.split("\t", 1)[-1].strip())
-                 for l in main.group(1).splitlines() if "\t" in l]
+                 for l in body.splitlines() if "\t" in l]
         stamps = [i for i, ins in enumerate(insns) if ins.startswith("rdtscp")]
-        # Exactly one start/stop pair is expected in main(); anything else
-        # (e.g. calibrate() inlined) means the timed region can't be
-        # identified reliably, and the check would be meaningless.
-        self.assertEqual(len(stamps), 2, "can't identify the timed region: %d rdtscp in main()" % len(stamps))
+        # Exactly one start/stop pair; anything else means the timed region
+        # can't be identified reliably, and the check would be meaningless.
+        self.assertEqual(len(stamps), 2, "can't identify the timed region: %d rdtscp" % len(stamps))
         region = insns[stamps[0] + 1:stamps[1]]
         self.assertTrue(any(re.match(r"(j[a-z]+|call)\b", ins) for ins in region),
                         "timed region contains no branch or call, so dispatch() was optimised "
