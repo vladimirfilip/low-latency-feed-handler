@@ -97,19 +97,39 @@ and socket names as the benchmark, so don't run the two at the same time.
 
 Run `bash download_data.sh` first to fetch the NASDAQ sample feed into `data/`.
 
-`bench/run_ipc_comparison.sh` builds all four IPC binaries, runs each
-transport's producer/consumer pair pinned to separate cores via `taskset`,
-cross-checks that published and received message counts match, and writes
-`bench/results/ipc_summary.csv` plus per-bucket histograms. It drives the
-producers in file mode, keeping the benchmark isolated to the transport
-comparison rather than ingestion cost.
+### Standard benchmark
+
+`bench/run_ipc_isolated.sh` is the standard benchmarking method. It enables CPU
+core isolation to reduce latency variance from scheduler noise and frequency
+scaling, runs both transport benchmarks, then restores the system to baseline.
+Requires root.
+
+```bash
+sudo bash bench/run_ipc_isolated.sh
+```
+
+Core isolation includes:
+- Disabling CPU frequency scaling (performance governor)
+- Adjusting scheduler settings for latency predictability
+- Redirecting system IRQs away from isolated cores
+- Disabling C-state power management
+
+Results are written to `bench/results/ipc_summary.csv` plus per-bucket histograms.
+
+### Baseline benchmark (no isolation)
+
+For comparison or on systems where root is unavailable:
 
 ```bash
 bash bench/run_ipc_comparison.sh
 ```
 
-`bench/benchmark_plots.ipynb` reads those CSVs and regenerates the graphs
-below into `bench/plots/`:
+This pins producer/consumer to separate cores via `taskset` but does not apply
+system-level isolation, so results will include scheduler noise and frequency-scaling variance.
+
+### Visualization
+
+Generate latency and throughput plots from benchmark results:
 
 ```bash
 jupyter nbconvert --to notebook --execute --inplace bench/benchmark_plots.ipynb
@@ -117,14 +137,9 @@ jupyter nbconvert --to notebook --execute --inplace bench/benchmark_plots.ipynb
 
 ## Results
 
-Same 200MB ITCH slice, 6,609,340 messages published end to end (published
+Same 200MB ITCH slice, 6,948,075 messages published end to end (published
 and received counts matched exactly — neither transport drops messages),
 producer and consumer pinned to separate cores.
-
-These results predate the transport and normalisation fixes and are due to be
-re-measured. The current code also publishes `U` and `C` messages, so the
-same slice now yields 6,948,075 messages; the ring producer also no longer
-publishes before its consumer has attached.
 
 ![End-to-end latency percentiles and sustained throughput, ring buffer vs. AF_UNIX socket](bench/plots/ipc_summary.png)
 
@@ -132,10 +147,6 @@ The ring buffer holds an **8×** latency advantage at p50/p95/p99 and a
 **~29×** throughput advantage. This tracks the design: the ring buffer path
 is one shared-memory write with no syscall, while the socket path pays a
 `send()`/`recv()` syscall pair and two kernel-mediated copies per message.
-(`max` is omitted — it ranged from ~94µs to over 1ms for *both* transports.
-Part of that was scheduler noise from having no core isolation; for the ring
-buffer it also included a startup backlog of ~1,024 messages stamped before
-the consumer attached, which the handshake has since removed.)
 
 ![Full end-to-end latency distribution, per power-of-two bucket, ring buffer vs. AF_UNIX socket](bench/plots/ipc_latency_distribution.png)
 

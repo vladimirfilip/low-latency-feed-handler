@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Producer and consumer are separate OS processes. This drives both
-# IPC transports end to end and compares end-to-end latency (producer
-# ingest -> consumer observe) and throughput:
+# DEPRECATED: Use bench/run_ipc_isolated.sh instead (it provides core isolation).
+#
+# This script runs both IPC transports end to end for baseline comparison
+# (without core isolation). Producer and consumer are separate OS processes,
+# pinned to separate cores via taskset.
 #
 #   ring  - SPSC shared-memory ring buffer (mmap, no syscall per message)
 #   unix  - AF_UNIX SOCK_SEQPACKET socket (syscall + kernel copy per message)
