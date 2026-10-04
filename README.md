@@ -99,20 +99,65 @@ Run `bash download_data.sh` first to fetch the NASDAQ sample feed into `data/`.
 
 ### Standard benchmark
 
-`bench/run_ipc_isolated.sh` is the standard benchmarking method. It enables CPU
-core isolation to reduce latency variance from scheduler noise and frequency
-scaling, runs both transport benchmarks, then restores the system to baseline.
-Requires root.
+The standard benchmark runs the producer and consumer on two fully isolated
+CPUs on different physical cores. It needs root, and isolation comes in two
+parts: kernel boot parameters (set up once, step 1) and runtime settings that
+`bench/run_ipc_isolated.sh` applies and undoes around every run (step 2).
+
+#### Step 1: one-time boot setup
+
+Pick two CPUs on different physical cores: not SMT siblings of each other
+(check `/sys/devices/system/cpu/cpu<N>/topology/thread_siblings_list`). The
+examples below use 12 and 14, the two highest physical cores on a 16-CPU
+machine with paired hyperthreads.
+
+| Kernel parameter | What it removes from the isolated CPUs |
+|---|---|
+| `isolcpus=domain,managed_irq,<cpus>` | Every other task, by excluding the CPUs from scheduling; and kernel-managed IRQs (e.g. NVMe and network queues) |
+| `nohz_full=<cpus>` | The periodic scheduler tick (250–1000 interrupts/s) while a single task runs |
+| `rcu_nocbs=<cpus>` | RCU callback processing, offloaded to kthreads on the other CPUs |
+
+`nohz_full` adds about 130ns to every syscall on those CPUs (measured on the
+benchmark machine), which the socket transport pays on each `send()` and `recv()`.
+
+1. Append the parameters to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`:
+   ```
+   GRUB_CMDLINE_LINUX_DEFAULT="quiet splash isolcpus=domain,managed_irq,12,14 nohz_full=12,14 rcu_nocbs=12,14"
+   ```
+2. Regenerate the GRUB config and reboot:
+   ```bash
+   sudo update-grub      # Fedora/RHEL: sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+   sudo reboot
+   ```
+3. Check that they took effect:
+   ```bash
+   cat /sys/devices/system/cpu/isolated    # should print 12,14
+   cat /sys/devices/system/cpu/nohz_full   # should print 12,14
+   ```
+
+The kernel needs `CONFIG_NO_HZ_FULL` and `CONFIG_RCU_NOCB_CPU` (check
+`/boot/config-$(uname -r)`); stock Ubuntu kernels have both. The isolated CPUs
+stay reserved until you remove the parameters, rerun `update-grub` and reboot.
+
+#### Step 2: run the benchmark
 
 ```bash
 sudo bash bench/run_ipc_isolated.sh
 ```
 
-Core isolation includes:
-- Disabling CPU frequency scaling (performance governor)
-- Adjusting scheduler settings for latency predictability
-- Redirecting system IRQs away from isolated cores
-- Disabling C-state power management
+The script first checks the step 1 parameters are active for its CPUs and
+stops with the exact line to add if not. It runs the producer on the higher of
+the two isolated CPUs and the consumer on the lower; pass
+`PRODUCER_CPU CONSUMER_CPU` to choose. Around the run it:
+- takes the CPUs' SMT siblings offline, so nothing shares their cores;
+- moves the remaining IRQs, unbound workqueues, and the lockup watchdog to the
+  other CPUs, pausing `irqbalance` if it's running;
+- disables idle states on the two CPUs and pins them to maximum frequency.
+
+Afterwards it restores every setting it changed, even if the benchmark fails.
+To apply or undo the runtime settings by hand (e.g. for repeated runs), use
+`sudo bash bench/isolate_cores.sh [PRODUCER CONSUMER]` and
+`sudo bash bench/isolate_cleanup.sh`.
 
 Results are written to `bench/results/ipc_summary.csv` plus per-bucket histograms.
 
@@ -124,32 +169,57 @@ For comparison or on systems where root is unavailable:
 bash bench/run_ipc_comparison.sh
 ```
 
-This pins producer/consumer to separate cores via `taskset` but does not apply
-system-level isolation, so results will include scheduler noise and frequency-scaling variance.
+This pins producer/consumer to two different physical cores via `taskset`
+but leaves the rest of the system untouched, so results include scheduler,
+interrupt, and frequency-scaling noise.
 
 ### Visualization
 
-Generate latency and throughput plots from benchmark results:
+The plotting notebook runs in a virtualenv at `bench/.venv` (gitignored).
+Create it once:
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace bench/benchmark_plots.ipynb
+python3 -m venv bench/.venv
+bench/.venv/bin/pip install nbconvert ipykernel matplotlib pandas
+```
+
+Then regenerate the plots in `bench/plots/` from the benchmark results (the
+executed copy of the notebook goes to a temp dir, keeping the committed one
+free of outputs):
+
+```bash
+bench/.venv/bin/jupyter nbconvert --to notebook --execute --output-dir "$(mktemp -d)" bench/benchmark_plots.ipynb
 ```
 
 ## Results
 
-Same 200MB ITCH slice, 6,948,075 messages published end to end (published
-and received counts matched exactly — neither transport drops messages),
-producer and consumer pinned to separate cores.
+Benchmark: 200MB ITCH slice, 6,948,075 messages published end-to-end.
+Published and received counts matched exactly — neither transport drops messages.
+Producer and consumer run on two different physical cores.
+
+### Latency and throughput
 
 ![End-to-end latency percentiles and sustained throughput, ring buffer vs. AF_UNIX socket](bench/plots/ipc_summary.png)
 
-The ring buffer holds an **8×** latency advantage at p50/p95/p99 and a
-**~29×** throughput advantage. This tracks the design: the ring buffer path
-is one shared-memory write with no syscall, while the socket path pays a
-`send()`/`recv()` syscall pair and two kernel-mediated copies per message.
+Latencies are reported as the lower edge of their power-of-two histogram
+bucket, so 128ns means 128–255ns.
+
+| | Ring buffer | AF_UNIX socket | Ring buffer advantage |
+|---|---:|---:|---:|
+| p50 | 128ns | 2,048ns | 16× |
+| p95 | 128ns | 4,096ns | 32× |
+| p99 | 128ns | 4,096ns | 32× |
+| p99.9 | 256ns | 4,096ns | 16× |
+| Throughput | 8.39M msg/s | 752K msg/s | 11× |
+
+This tracks the transport design: the ring buffer path is one shared-memory
+write with no syscall, while the socket path incurs a `send()`/`recv()`
+syscall pair and two kernel-mediated copies per message.
+
+### Full latency distribution
 
 ![Full end-to-end latency distribution, per power-of-two bucket, ring buffer vs. AF_UNIX socket](bench/plots/ipc_latency_distribution.png)
 
-The full distribution makes the same point more concretely: the socket
-path's entire mass sits an order of magnitude higher than the ring buffer's,
-not just its tail.
+The full distribution shows the same gap: 99.8% of ring-buffer messages land
+in the 128–256ns bucket, while the socket path has nothing below 1,024ns and
+99.9% of its mass in 1,024–8,192ns.

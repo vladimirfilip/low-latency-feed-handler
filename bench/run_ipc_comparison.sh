@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# DEPRECATED: Use bench/run_ipc_isolated.sh instead (it provides core isolation).
-#
-# This script runs both IPC transports end to end for baseline comparison
-# (without core isolation). Producer and consumer are separate OS processes,
-# pinned to separate cores via taskset.
+# Runs both IPC transports end to end. Producer and consumer are separate OS
+# processes, pinned to separate cores via taskset. bench/run_ipc_isolated.sh
+# wraps this with core isolation settings; run it directly for a baseline.
 #
 #   ring  - SPSC shared-memory ring buffer (mmap, no syscall per message)
 #   unix  - AF_UNIX SOCK_SEQPACKET socket (syscall + kernel copy per message)
@@ -20,15 +18,25 @@ if ! command -v taskset >/dev/null 2>&1; then
     exit 1
 fi
 
-# Producer and consumer are pinned to distinct cores — they're separate
-# processes exchanging data cross-core, and pinning both to the same core
-# would just serialize them via preemption, hiding the IPC cost we're trying
-# to measure. Override with BENCH_PRODUCER_CORE / BENCH_CONSUMER_CORE.
-NPROC="$(nproc)"
-PRODUCER_CORE="${BENCH_PRODUCER_CORE:-$((NPROC - 1))}"
-CONSUMER_CORE="${BENCH_CONSUMER_CORE:-$((NPROC - 2))}"
-if [ "$PRODUCER_CORE" = "$CONSUMER_CORE" ] || [ "$CONSUMER_CORE" -lt 0 ]; then
-    echo "Need at least 2 cores to pin producer/consumer separately (nproc=$NPROC)." >&2
+# Producer and consumer are pinned to distinct physical cores — they're
+# separate processes exchanging data cross-core. Pinning both to one CPU would
+# serialize them via preemption, and pinning them to SMT siblings would share
+# L1/L2 between them; either hides the IPC cost we're trying to measure.
+# Defaults to the first hardware thread of the two highest-numbered physical
+# cores. Override with BENCH_PRODUCER_CORE / BENCH_CONSUMER_CORE.
+if [ -z "${BENCH_PRODUCER_CORE:-}" ] || [ -z "${BENCH_CONSUMER_CORE:-}" ]; then
+    mapfile -t PHYS_CORES < <(sort -un /sys/devices/system/cpu/cpu[0-9]*/topology/thread_siblings_list)
+    if [ "${#PHYS_CORES[@]}" -lt 2 ]; then
+        echo "Need at least 2 physical cores to pin producer/consumer separately." >&2
+        exit 1
+    fi
+    DEFAULT_PRODUCER_CORE="${PHYS_CORES[-1]%%[-,]*}"
+    DEFAULT_CONSUMER_CORE="${PHYS_CORES[-2]%%[-,]*}"
+fi
+PRODUCER_CORE="${BENCH_PRODUCER_CORE:-$DEFAULT_PRODUCER_CORE}"
+CONSUMER_CORE="${BENCH_CONSUMER_CORE:-$DEFAULT_CONSUMER_CORE}"
+if [ "$PRODUCER_CORE" = "$CONSUMER_CORE" ]; then
+    echo "Producer and consumer must be pinned to different cores (both $PRODUCER_CORE)." >&2
     exit 1
 fi
 
@@ -80,6 +88,15 @@ run_variant() {
         echo "warning: ${variant} published=${published} received=${received} (mismatch)" >&2
     fi
 }
+
+# Producers mmap this file (relative to the working directory, like their
+# default) and timestamp a record before reading its body, so a page-cache miss
+# would put disk latency into the measurement. Read it once up front.
+DATA_FILE="data/03272019.NASDAQ_ITCH50.200MB"
+if [ -r "$DATA_FILE" ]; then
+    echo "Warming page cache with $DATA_FILE..."
+    cat "$DATA_FILE" >/dev/null
+fi
 
 echo "Pinning producer -> core $PRODUCER_CORE, consumer -> core $CONSUMER_CORE"
 echo "Running ring-buffer transport..."

@@ -1,59 +1,35 @@
 #!/usr/bin/env bash
-# Restore core isolation settings saved by isolate_cores.sh.
-# Requires root.
+# Undoes isolate_cores.sh, replaying its recorded changes in reverse order.
+# Safe to rerun: if anything fails, the state file is kept so a second run
+# can retry. Requires root.
 #
-# Usage:
-#   sudo bash isolate_cleanup.sh
+# Usage: sudo bash bench/isolate_cleanup.sh
+set -uo pipefail
 
-set -euo pipefail
+STATE=/run/bench-isolation.state
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Error: this script requires root (use: sudo $0)" >&2
+    echo "Error: requires root (use: sudo $0)" >&2
     exit 1
 fi
+if [ ! -f "$STATE" ]; then
+    echo "No isolation state at $STATE; nothing to restore."
+    exit 0
+fi
 
-STATE_FILE="/tmp/core_isolation_state.txt"
+failed=0
+while IFS='|' read -r kind target value; do
+    case "$kind" in
+        write)
+            echo "$value" > "$target" 2>/dev/null || { echo "  ✗ $target -> $value" >&2; failed=$((failed + 1)); } ;;
+        start)
+            systemctl start "$target" || { echo "  ✗ couldn't start $target" >&2; failed=$((failed + 1)); } ;;
+    esac
+done < <(tac "$STATE")
 
-if [ ! -f "$STATE_FILE" ]; then
-    echo "Error: state file not found at $STATE_FILE" >&2
-    echo "Did you run 'sudo bash bench/isolate_cores.sh' first?" >&2
+if [ "$failed" -ne 0 ]; then
+    echo "$failed setting(s) failed to restore; state kept at $STATE — rerun to retry." >&2
     exit 1
 fi
-
-echo "Restoring core isolation settings from: $STATE_FILE"
-echo ""
-
-restored=0
-errors=0
-
-while IFS='|' read -r name path value; do
-    if [ -z "$name" ] || [ -z "$path" ]; then
-        continue
-    fi
-
-    if [ ! -e "$path" ]; then
-        echo "  ⚠ Skipped (path missing): $name"
-        ((errors++))
-        continue
-    fi
-
-    if echo "$value" > "$path" 2>/dev/null; then
-        echo "  ✓ Restored: $name = $value"
-        ((restored++))
-    else
-        echo "  ✗ Failed to restore: $name (permission denied or invalid value)"
-        ((errors++))
-    fi
-done < "$STATE_FILE"
-
-echo ""
-if [ $restored -gt 0 ]; then
-    echo "Successfully restored $restored settings"
-fi
-if [ $errors -gt 0 ]; then
-    echo "Failed to restore $errors settings (may require elevated privileges)"
-fi
-
-rm -f "$STATE_FILE"
-echo ""
-echo "Core isolation disabled. Settings restored to baseline."
+rm -f "$STATE"
+echo "Isolation removed; all settings restored."
