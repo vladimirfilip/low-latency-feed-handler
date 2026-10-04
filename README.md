@@ -1,49 +1,38 @@
 # Low-Latency Feed Handler
 
-A C++20 market-data feed handler: ingest a raw NASDAQ ITCH 5.0 feed (mmap'd
-file or live UDP replay), parse and normalize each message into a fixed
-64-byte struct, and publish it to a separate consumer process. The core of
-the project is comparing two IPC transports for that hand-off — a lock-free
-SPSC ring buffer in shared memory vs. an `AF_UNIX` socket — on end-to-end
-latency and throughput.
+A C++20 market-data feed handler that parses a NASDAQ ITCH 5.0 feed and
+publishes normalized messages to a separate consumer process. The point of the
+project is comparing two transports for that hand-off on end-to-end latency
+and throughput: a lock-free SPSC ring buffer in shared memory and an
+`AF_UNIX` socket.
 
 ## Design overview
 
-- **Ingestion** (`src/ingest_source.hpp`, `ingest_mmap.hpp`, `ingest_socket.hpp`) —
-  a common `IngestSource` interface over two modes: file mode `mmap`s the
-  `.itch` file directly (zero-copy, no network involved), and socket mode
-  reads MoldUDP64-framed UDP datagrams (NASDAQ's real batching protocol). A
-  `replay` tool re-emits a file over UDP so socket mode can be exercised
-  end-to-end, either at max rate or paced to the original inter-message gaps.
-  Both sources drop malformed input instead of handing it on: records
-  shorter than their message type's wire size, and (over UDP) lengths or
-  message counts that run past the datagram, plus sequence numbers already
-  delivered. A missing or unreadable data file is an error, not an empty feed.
-- **Dispatch & handlers** (`src/dispatch.hpp`, `handlers.hpp`) — a `switch` on
+- **Ingestion** (`src/ingest_source.hpp`, `ingest_mmap.hpp`, `ingest_socket.hpp`):
+  one `IngestSource` interface with two modes. File mode `mmap`s the `.itch`
+  file. Socket mode reads MoldUDP64-framed UDP datagrams, sent by the `replay`
+  tool at max rate or at the feed's original pacing. Both drop malformed input
+  (truncated records, lengths or counts that overrun a datagram, repeated
+  sequence numbers). A missing data file is an error, not an empty feed.
+- **Dispatch & handlers** (`src/dispatch.hpp`, `handlers.hpp`): a `switch` on
   the message-type byte routes each record to a handler that byte-swaps the
-  packed wire struct into a normalized message, returned by value.
-- **Normalization** (`src/normalise.hpp`) — the order-book-relevant message
-  types (`S R A F E C X D U P`) collapse into one fixed-size, 64-byte,
-  trivially-copyable `NormalisedMessage` (one cache line), so it can be pushed
-  straight into a shared-memory ring buffer or written raw over a socket with
-  no serialization step. Other types are dropped. Order Replace (`U`) carries
-  both the new and the original order reference.
-- **IPC bus** (`src/spsc-ring-buffer.hpp`, `ipc/`) — `producer_main` ingests
-  and dispatches like a normal feed handler, then publishes each
-  `NormalisedMessage` to a standalone `consumer_main` over one of two
-  transports, chosen at compile time: a shared-memory SPSC ring buffer
-  (acquire/release atomics, no syscalls), or an `AF_UNIX SOCK_SEQPACKET`
-  socket (the baseline — a syscall plus a kernel-mediated copy per message).
-  The ring's shared-memory segment (owner-only, `0600`) has a small handshake:
-  the producer publishes nothing until a consumer has claimed the ring, a
-  consumer ignores segments left behind by a dead producer, and either side
-  notices if its peer dies instead of waiting forever. A consumer whose
-  stream ends without the producer's end marker exits non-zero, since its
-  results are partial.
-- **Latency measurement** (`src/latency_histogram.hpp`) — a zero-allocation,
-  power-of-two-bucketed histogram, fed `rdtsc` cycles for in-process
+  packed wire struct into a normalized message.
+- **Normalization** (`src/normalise.hpp`): the order-book message types
+  (`S R A F E C X D U P`) become one 64-byte, trivially copyable
+  `NormalisedMessage`. That's one cache line, and it goes into the ring or onto
+  the socket with no serialization. Other types are dropped.
+- **IPC** (`src/spsc-ring-buffer.hpp`, `ipc/`): `producer_main` ingests and
+  dispatches, then publishes to `consumer_main` over a transport chosen at
+  compile time. The ring uses acquire/release atomics and no syscalls. The
+  `SOCK_SEQPACKET` socket baseline costs a syscall and a kernel copy per
+  message. The ring's shared-memory segment (mode `0600`) has a handshake: the
+  producer waits for a consumer to claim it, consumers ignore segments left by
+  a dead producer, and either side notices if its peer dies. A consumer that
+  never sees the end marker exits non-zero, since its results are partial.
+- **Latency measurement** (`src/latency_histogram.hpp`): a zero-allocation
+  histogram with power-of-two buckets, fed `rdtsc` cycles for in-process
   parse/dispatch latency and `CLOCK_MONOTONIC` nanoseconds for cross-process
-  end-to-end IPC latency.
+  latency.
 
 ## Build
 
